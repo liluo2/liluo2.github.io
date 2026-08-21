@@ -618,22 +618,48 @@
             });
         }
 
-        fetch('https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json')
-            .then(r => {
-                if (!r.ok) throw new Error(`地图数据加载失败 (${r.status})`);
-                return r.json();
-            })
-            .then(chinaJson => {
-                echarts.registerMap('china', chinaJson);
-                initMapOptions();
-                mapReady = true;
-                document.getElementById('start-btn').disabled = false;
-            })
-            .catch(err => {
-                console.error(err);
-                document.querySelector('.rules').insertAdjacentHTML('beforeend', '<br><b style="color:#dc2626">⚠ 地图数据加载失败，请检查网络后刷新页面。</b>');
-                document.getElementById('start-btn').disabled = true;
-            });
+        // ---- 地图数据加载：优先使用 jsDelivr 镜像，避免部分 App 内置浏览器拦截 DataV ----
+        const CHINA_MAP_SOURCES = [
+            './china.json',
+            'https://cdn.jsdelivr.net/gh/NetworkSecurityVision/geojson-china@master/data/100000_full.json',
+            'https://cdn.jsdelivr.net/gh/yaunfei/GeoJSON_CDN@1.0.0/100000_full.json',
+            'https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json'
+        ];
+
+        async function loadChinaMap() {
+            let lastError = null;
+            for (const url of CHINA_MAP_SOURCES) {
+                try {
+                    const r = await fetch(url, { cache: 'force-cache' });
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                    const chinaJson = await r.json();
+                    if (!chinaJson || !Array.isArray(chinaJson.features) || chinaJson.features.length === 0) {
+                        throw new Error('地图数据为空');
+                    }
+                    echarts.registerMap('china', chinaJson);
+                    initMapOptions();
+                    mapReady = true;
+                    document.getElementById('start-btn').disabled = false;
+                    console.log('地图数据加载成功：', url);
+                    return;
+                } catch (err) {
+                    console.warn('地图源加载失败：', url, err);
+                    lastError = err;
+                }
+            }
+
+            console.error('所有地图源均加载失败', lastError);
+            const rules = document.querySelector('.rules');
+            if (rules && !document.getElementById('map-load-error')) {
+                rules.insertAdjacentHTML(
+                    'beforeend',
+                    '<br><b id="map-load-error" style="color:#dc2626">⚠ 地图数据加载失败。请点击右上角菜单，选择“在浏览器中打开”，或检查网络后刷新。</b>'
+                );
+            }
+            document.getElementById('start-btn').disabled = true;
+        }
+
+        loadChinaMap();
 
         function currentSharedQuestion() {
             const level = sharedQuestions[sharedLevelIndex];
