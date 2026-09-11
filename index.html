@@ -1062,8 +1062,8 @@
             charts.right.resize();
         });
 
-        // 地图没加载完时禁止开始，避免空白比赛。
-        document.getElementById('start-btn').disabled = true;
+        // 开始按钮的 disabled 状态由地图初始化流程控制：
+        // 初始化成功时启用；初始化失败时保持禁用。
     </script>
 </body>
 </html>
