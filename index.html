@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>中国地图 - 双人抢答挑战</title>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts-map-chinajs@1.0.2/china.js"></script>
     <style>
         :root {
             --bg: #f1f5f9;
@@ -512,6 +513,30 @@
             "香港特别行政区": { abbr: "港", capital: "香港" }
         };
         const allProvinceNames = Object.keys(provinceData);
+
+        // ---- ECharts 中国地图使用简称；游戏题库使用完整行政区名 ----
+        const MAP_NAME_TO_PROVINCE = {
+            "北京": "北京市", "天津": "天津市", "河北": "河北省", "山西": "山西省",
+            "内蒙古": "内蒙古自治区", "辽宁": "辽宁省", "吉林": "吉林省", "黑龙江": "黑龙江省",
+            "上海": "上海市", "江苏": "江苏省", "浙江": "浙江省", "安徽": "安徽省",
+            "福建": "福建省", "江西": "江西省", "山东": "山东省", "河南": "河南省",
+            "湖北": "湖北省", "湖南": "湖南省", "广东": "广东省", "广西": "广西壮族自治区",
+            "海南": "海南省", "重庆": "重庆市", "四川": "四川省", "贵州": "贵州省",
+            "云南": "云南省", "西藏": "西藏自治区", "陕西": "陕西省", "甘肃": "甘肃省",
+            "青海": "青海省", "宁夏": "宁夏回族自治区", "新疆": "新疆维吾尔自治区",
+            "台湾": "台湾省", "香港": "香港特别行政区"
+        };
+        const PROVINCE_TO_MAP_NAME = Object.fromEntries(
+            Object.entries(MAP_NAME_TO_PROVINCE).map(([mapName, province]) => [province, mapName])
+        );
+
+        function normalizeMapProvinceName(mapName) {
+            return MAP_NAME_TO_PROVINCE[mapName] || mapName;
+        }
+
+        function toMapRegionName(provinceName) {
+            return PROVINCE_TO_MAP_NAME[provinceName] || provinceName;
+        }
         const LEVEL_CONFIG = [
             { id: 1, name: "第1关·轮廓识别", count: 5, type: "province", label: "省名" },
             { id: 2, name: "第2关·简称识别", count: 8, type: "abbr", label: "简称" },
@@ -595,71 +620,92 @@
         }
         const players = { left: makePlayer('left'), right: makePlayer('right') };
 
+        function setSelectionColor(chart, color) {
+            chart.setOption({
+                geo: {
+                    select: {
+                        itemStyle: { areaColor: color, borderColor: color, borderWidth: 2.6 },
+                        label: { show: false }
+                    }
+                }
+            });
+        }
+
         function initMapOptions() {
             Object.entries(charts).forEach(([side, chart]) => {
-                const accent = side === 'left' ? '#2563eb' : '#e11d48';
+                const accent = side === 'left' ? '#1d4ed8' : '#be123c';
                 chart.setOption({
                     animationDuration: 180,
                     tooltip: { show: false },
                     geo: {
                         map: 'china',
                         roam: true,
+                        selectedMode: 'multiple',
                         label: { show: false },
-                        layoutCenter: ['50%', '50%'],
-                        layoutSize: '92%',
+                        layoutCenter: ['50%', '53%'],
+                        layoutSize: '110%',
                         itemStyle: { areaColor: '#e2e8f0', borderColor: '#94a3b8', borderWidth: 1.25 },
                         emphasis: { itemStyle: { areaColor: '#cbd5e1' }, label: { show: false } },
-                        select: { itemStyle: { areaColor: accent, borderColor: accent, borderWidth: 2 }, label: { show: false } }
+                        select: { itemStyle: { areaColor: accent, borderColor: accent, borderWidth: 2.6 }, label: { show: false } }
                     }
                 });
                 chart.on('click', params => {
-                    if (params.componentType === 'geo') handleProvinceClick(side, params.name);
+                    if (params.componentType === 'geo') {
+                        handleProvinceClick(side, normalizeMapProvinceName(params.name));
+                    }
                 });
             });
         }
 
-        // ---- 地图数据加载：优先使用 jsDelivr 镜像，避免部分 App 内置浏览器拦截 DataV ----
-        const CHINA_MAP_SOURCES = [
-            './china.json',
-            'https://cdn.jsdelivr.net/gh/NetworkSecurityVision/geojson-china@master/data/100000_full.json',
-            'https://cdn.jsdelivr.net/gh/yaunfei/GeoJSON_CDN@1.0.0/100000_full.json',
-            'https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json'
-        ];
+        function flashProvinceSelection(side, provinceName) {
+            const p = players[side];
+            const mapName = toMapRegionName(provinceName);
+            const color = side === 'left' ? '#1d4ed8' : '#be123c';
+            setSelectionColor(p.chart, color);
+            p.chart.dispatchAction({ type: 'unselect', name: mapName });
+            p.chart.dispatchAction({ type: 'select', name: mapName });
 
-        async function loadChinaMap() {
-            let lastError = null;
-            for (const url of CHINA_MAP_SOURCES) {
-                try {
-                    const r = await fetch(url, { cache: 'force-cache' });
-                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                    const chinaJson = await r.json();
-                    if (!chinaJson || !Array.isArray(chinaJson.features) || chinaJson.features.length === 0) {
-                        throw new Error('地图数据为空');
-                    }
-                    echarts.registerMap('china', chinaJson);
-                    initMapOptions();
-                    mapReady = true;
-                    document.getElementById('start-btn').disabled = false;
-                    console.log('地图数据加载成功：', url);
-                    return;
-                } catch (err) {
-                    console.warn('地图源加载失败：', url, err);
-                    lastError = err;
+            setTimeout(() => {
+                // 正确答案锁题后由 showWinnerProvince 接管高亮，不在这里恢复。
+                if (questionActive) {
+                    p.chart.dispatchAction({ type: 'unselect', name: mapName });
                 }
-            }
-
-            console.error('所有地图源均加载失败', lastError);
-            const rules = document.querySelector('.rules');
-            if (rules && !document.getElementById('map-load-error')) {
-                rules.insertAdjacentHTML(
-                    'beforeend',
-                    '<br><b id="map-load-error" style="color:#dc2626">⚠ 地图数据加载失败。请点击右上角菜单，选择“在浏览器中打开”，或检查网络后刷新。</b>'
-                );
-            }
-            document.getElementById('start-btn').disabled = true;
+            }, 280);
         }
 
-        loadChinaMap();
+        function showWinnerProvince(side, provinceName) {
+            const mapName = toMapRegionName(provinceName);
+            const color = side === 'left' ? '#1d4ed8' : '#be123c';
+            Object.values(players).forEach(player => {
+                setSelectionColor(player.chart, color);
+                player.chart.dispatchAction({ type: 'unselect', name: mapName });
+                player.chart.dispatchAction({ type: 'select', name: mapName });
+            });
+        }
+
+        // ---- 单 HTML 版地图加载 ----
+        // 中国地图通过和 ECharts 相同的 jsDelivr 脚本预先注册，不再 fetch china.json。
+        function initializeChinaMap() {
+            try {
+                const registered = typeof echarts.getMap === 'function' ? echarts.getMap('china') : null;
+                if (!registered) throw new Error('china map is not registered');
+                initMapOptions();
+                mapReady = true;
+                document.getElementById('start-btn').disabled = false;
+            } catch (err) {
+                console.error('中国地图脚本加载失败', err);
+                const rules = document.querySelector('.rules');
+                if (rules && !document.getElementById('map-load-error')) {
+                    rules.insertAdjacentHTML(
+                        'beforeend',
+                        '<br><b id="map-load-error" style="color:#dc2626">⚠ 地图组件加载失败。请刷新页面，或点击右上角菜单选择“在浏览器中打开”。</b>'
+                    );
+                }
+                document.getElementById('start-btn').disabled = true;
+            }
+        }
+
+        initializeChinaMap();
 
         function currentSharedQuestion() {
             const level = sharedQuestions[sharedLevelIndex];
@@ -682,7 +728,9 @@
 
         function resetChartSelections() {
             Object.values(players).forEach(p => {
-                allProvinceNames.forEach(name => p.chart.dispatchAction({ type: 'unselect', name }));
+                Object.keys(MAP_NAME_TO_PROVINCE).forEach(mapName => {
+                    p.chart.dispatchAction({ type: 'unselect', name: mapName });
+                });
             });
         }
 
@@ -768,6 +816,9 @@
             const q = currentSharedQuestion();
             if (!q) return;
 
+            // 每一次点击都先显示本方颜色，给抢答者明确的视觉反馈。
+            flashProvinceSelection(side, clickedName);
+
             if (clickedName !== q.province) {
                 setFeedback(p, `❌ 不是【${clickedName}】！继续抢！`, 'error');
                 playWrongSound();
@@ -783,8 +834,8 @@
             sharedTotalAnswered++;
             sharedQuestionIndex++;
 
-            p.chart.dispatchAction({ type: 'select', name: q.province });
-            other.chart.dispatchAction({ type: 'select', name: q.province });
+            // 谁先答对，就让左右两张地图都用胜方颜色高亮正确省份。
+            showWinnerProvince(side, q.province);
 
             const winnerName = playerName(p, side === 'left' ? '蓝方' : '红方');
             setStatus(p, '抢答成功', 'finished');
